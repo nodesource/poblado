@@ -1,0 +1,30 @@
+{
+    "name" : "poblado",
+    "version" : "0.0.0",
+    "description" : "Parses and processes JSON that is written to it in chunks on a background thread",
+    "main" : "poblado.js",
+    "scripts" : {
+      "test" : "tape test/*.js"
+    },
+    "repository" : {
+      "type" : "git",
+      "url" : "git://github.com/nodesource/poblado.git"
+    },
+    "homepage" : "https://github.com/nodesource/poblado",
+    "dependencies" : {
+    },
+    "devDependencies" : {
+      "tape": "~4.8.0"
+    },
+    "keywords": [] ,
+    "author" : {
+      "name" : "Thorsten Lorenz",
+      "email" : "thlorenz@gmx.de",
+      "url" : "http://nodesource.com"
+    },
+    "license" : {
+      "type": "MIT",
+      "url": "https://github.com/nodesource/poblado/blob/master/LICENSE"
+    },
+    "engine" : { "node" : ">=6" }
+}
