@@ -19,10 +19,6 @@ typedef struct {
   RapidjsonWritable& writable;
 } write_chunk_data_t;
 
-void collect_processed_snapshot(uv_idle_t* handle) {
-
-}
-
 void onwrite_chunk(uv_idle_t* handle) {
   // write chunk every 10th iteration to simulate that the chunks are coming in slowly
   if ((ticks % WRITE_CHUNK_INTERVAL) != 0) return;
@@ -48,28 +44,112 @@ void start_write_chunk(
   ASSERT(r == 0);
 }
 
-class Writable : public RapidjsonWritable {
+class KeyCollectorWritable : public RapidjsonWritable {
   public:
-    Writable() : RapidjsonWritable() {}
+    KeyCollectorWritable()
+      : RapidjsonWritable(), processingComplete_(false) {
+      uv_mutex_init(&completeMutex_);
+    }
+
+    //
+    // Processing complete checks and processing results retrieval methods
+    // are called from main loop thread
+    bool isProcessingComplete() {
+      bool iscomplete;
+      // We use the cheaper lock, which is only locked by processor once
+      // to notify us that processing is complete to verify that we can go and
+      // get the processing result.
+      uv_mutex_lock(&completeMutex_);
+      {
+        iscomplete = processingComplete_;
+      }
+      uv_mutex_unlock(&completeMutex_);
+
+      return iscomplete;
+    }
+
+    std::vector<const char*>& getProcessingResult() {
+      // At this point we verified vis isProcessingComplete (using cheap lock)
+      // that the data is ready.
+      // The processor guarantees now that it won't access the data anymore, therefore
+      // we don't need to obtain another lock to return + access it on the main thread.
+      return processedKeys_;  
+    }
 
   protected:
+    //
+    // The below overrides are called on parsing/processing background thread
+    //
+    // @override
     void onparserFailure(rapidjson::Reader& reader) {
-      poblado_log("parser failure");
+      poblado_log("[processor] parser failure");
     }
 
+    // @override
     void onparsedToken(rapidjson_writable::SaxHandler& handler) {
-      poblado_log("parsed a token");
+      poblado_log("[processor] parsed a token");
+      if (handler.type != rapidjson_writable::JsonType::Key) return;
+      keys_.push_back(scopy(handler.stringVal.c_str()));
     }
 
+    // @override
     void onparseComplete() {
-      poblado_log("parser complete");
+      // process the collected data when parsing completed
+      poblado_log("[processor] parser complete, processing keys");
+      for (auto& key : keys_) {
+        poblado_log(key);
+        processedKeys_.push_back(string_toupper(key));
+
+        // simulate that processing keys is slow
+        uv_sleep(200);
+      }
+
+      // Signal to main thread that processing is complete and the data can
+      // now be accesseed.
+      poblado_log("[processor] signaling processing is complete" );
+      uv_mutex_lock(&completeMutex_);
+      {
+        processingComplete_ = true;
+      }
+      uv_mutex_unlock(&completeMutex_);
     }
+
+  private:
+    std::vector<const char*> keys_;
+    uv_mutex_t completeMutex_;
+    std::vector<const char*> processedKeys_;
+    bool processingComplete_;
 };
+
+void oncollect_processed_data(uv_idle_t* handle) {
+  KeyCollectorWritable* keyCollector = static_cast<KeyCollectorWritable*>(handle->data);
+  // Not complete yet, so we'll check again on the next tick
+  if (!keyCollector->isProcessingComplete()) return;
+  poblado_log("[collector] found processing is complete, reading results");
+
+  std::vector<const char*> processedKeys = keyCollector->getProcessingResult();
+  for (auto& key : processedKeys) {
+    poblado_log("[collector] printing key");
+    poblado_log(key);
+  }
+  uv_idle_stop(handle);
+}
+
+void start_collect_processed_data(
+    uv_loop_t* loop,
+    uv_idle_t& processed_data_handler,
+    KeyCollectorWritable& keyCollector) {
+  int r = uv_idle_init(loop, &processed_data_handler);
+  ASSERT(r == 0);
+  processed_data_handler.data = &keyCollector;
+  r = uv_idle_start(&processed_data_handler, oncollect_processed_data);
+  ASSERT(r == 0);
+}
 
 void ontick(uv_idle_t* tick_handler) {
   ticks++;
   if ((ticks % LOG_TICK_INTERVAL) != 0) return;
-  poblado_log("tick");
+  poblado_log("[ticker] tick");
 }
 
 void start_tick(uv_loop_t* loop, uv_idle_t& tick_handler) {
@@ -81,11 +161,11 @@ void start_tick(uv_loop_t* loop, uv_idle_t& tick_handler) {
 
 int main(int argc, char *argv[]) {
   const char* file = argv[1];
-  fprintf(stderr, "Processing %s\n", file);
+  fprintf(stderr, "[main] processing %s\n", file);
   std::ifstream ifs(file);
 
   uv_loop_t* loop = uv_default_loop();
-  Writable writable;
+  KeyCollectorWritable writable;
   {
     const int ok = 1;
     const int* r = writable.init(&ok);
@@ -105,7 +185,11 @@ int main(int argc, char *argv[]) {
     start_tick(loop, tick_handler);
   }
 
-  poblado_log("starting loop");
+  uv_idle_t collect_processed_handler;
+  {
+    start_collect_processed_data(loop, collect_processed_handler, writable);
+  }
+  poblado_log("[main] starting loop");
   uv_run(loop, UV_RUN_DEFAULT);
 
   return 0;
