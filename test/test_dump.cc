@@ -14,6 +14,9 @@ int32_t ticks = 0;
 
 using rapidjson_writable::RapidjsonWritable;
 
+//
+// Chunk Producer
+//
 typedef struct {
   std::istream& stream;
   RapidjsonWritable& writable;
@@ -46,9 +49,10 @@ void start_write_chunk(
 
 class KeyCollectorWritable : public RapidjsonWritable {
   public:
-    KeyCollectorWritable()
-      : RapidjsonWritable(), processingComplete_(false) {
+    KeyCollectorWritable(uv_loop_t& loop)
+      : RapidjsonWritable(), loop_(loop), processingComplete_(false) {
       uv_mutex_init(&completeMutex_);
+      awaitProcessed();
     }
 
     //
@@ -73,7 +77,7 @@ class KeyCollectorWritable : public RapidjsonWritable {
       // that the data is ready.
       // The processor guarantees now that it won't access the data anymore, therefore
       // we don't need to obtain another lock to return + access it on the main thread.
-      return processedKeys_;  
+      return processedKeys_;
     }
 
   protected:
@@ -115,36 +119,37 @@ class KeyCollectorWritable : public RapidjsonWritable {
     }
 
   private:
+    static void onCheckProcessed(uv_idle_t* handle) {
+      KeyCollectorWritable* self = static_cast<KeyCollectorWritable*>(handle->data);
+      if (!self->isProcessingComplete()) return;
+      poblado_log("[collector] found processing is complete, reading results");
+
+      // TODO: call a function that's passed to us so user can decide how to process
+      // Alternatively add a virtual method that we call
+      std::vector<const char*> processedKeys = self->getProcessingResult();
+      for (auto& key : processedKeys) {
+        poblado_log("[collector] printing key");
+        poblado_log(key);
+      }
+      uv_idle_stop(handle);
+    }
+
+    void awaitProcessed() {
+      int r = uv_idle_init(&loop_, &processed_handler_);
+      ASSERT(r == 0);
+      processed_handler_.data = this;
+      r = uv_idle_start(&processed_handler_, onCheckProcessed);
+      ASSERT(r == 0);
+    }
+
+    uv_loop_t& loop_;
+    uv_idle_t processed_handler_;
+
     std::vector<const char*> keys_;
     uv_mutex_t completeMutex_;
     std::vector<const char*> processedKeys_;
     bool processingComplete_;
 };
-
-void oncollect_processed_data(uv_idle_t* handle) {
-  KeyCollectorWritable* keyCollector = static_cast<KeyCollectorWritable*>(handle->data);
-  // Not complete yet, so we'll check again on the next tick
-  if (!keyCollector->isProcessingComplete()) return;
-  poblado_log("[collector] found processing is complete, reading results");
-
-  std::vector<const char*> processedKeys = keyCollector->getProcessingResult();
-  for (auto& key : processedKeys) {
-    poblado_log("[collector] printing key");
-    poblado_log(key);
-  }
-  uv_idle_stop(handle);
-}
-
-void start_collect_processed_data(
-    uv_loop_t* loop,
-    uv_idle_t& processed_data_handler,
-    KeyCollectorWritable& keyCollector) {
-  int r = uv_idle_init(loop, &processed_data_handler);
-  ASSERT(r == 0);
-  processed_data_handler.data = &keyCollector;
-  r = uv_idle_start(&processed_data_handler, oncollect_processed_data);
-  ASSERT(r == 0);
-}
 
 void ontick(uv_idle_t* tick_handler) {
   ticks++;
@@ -165,7 +170,7 @@ int main(int argc, char *argv[]) {
   std::ifstream ifs(file);
 
   uv_loop_t* loop = uv_default_loop();
-  KeyCollectorWritable writable;
+  KeyCollectorWritable writable(*loop);
   {
     const int ok = 1;
     const int* r = writable.init(&ok);
@@ -185,10 +190,6 @@ int main(int argc, char *argv[]) {
     start_tick(loop, tick_handler);
   }
 
-  uv_idle_t collect_processed_handler;
-  {
-    start_collect_processed_data(loop, collect_processed_handler, writable);
-  }
   poblado_log("[main] starting loop");
   uv_run(loop, UV_RUN_DEFAULT);
 
