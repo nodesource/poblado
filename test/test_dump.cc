@@ -55,6 +55,8 @@ class ExtractKeysProcessor : public Poblado {
 // } background thread
 
 // main thread {
+
+    // @override
     void onprocessingComplete() {
       if (hasError()) {
         TEST_LOG("[collector] found error");
@@ -68,7 +70,8 @@ class ExtractKeysProcessor : public Poblado {
       }
       onfinished_();
     }
-// main thread }
+
+// } main thread
 
     std::vector<const char*> keys_;
     std::vector<const char*> processedKeys_;
