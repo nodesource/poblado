@@ -12,43 +12,16 @@ const int32_t LOG_TICK_INTERVAL = 1E6;
 const int32_t WRITE_CHUNK_INTERVAL = LOG_TICK_INTERVAL / 2;
 int32_t ticks = 0;
 
+//
+// API
+//
 using rapidjson_writable::RapidjsonWritable;
-
-//
-// Chunk Producer
-//
-typedef struct {
-  std::istream& stream;
-  RapidjsonWritable& writable;
-} write_chunk_data_t;
-
-void onwrite_chunk(uv_idle_t* handle) {
-  // write chunk every 10th iteration to simulate that the chunks are coming in slowly
-  if ((ticks % WRITE_CHUNK_INTERVAL) != 0) return;
-
-  write_chunk_data_t* write_chunk_data = static_cast<write_chunk_data_t*>(handle->data);
-  std::istream& stream = write_chunk_data->stream;
-  RapidjsonWritable& writable = write_chunk_data->writable;
-
-  std::vector<char> buffer(CHUNK_SIZE, 0);
-  stream.read(buffer.data(), buffer.size());
-  writable.write(*buffer.data(), buffer.size());
-  if (stream.eof()) uv_idle_stop(handle);
-}
-
-void start_write_chunk(
-    uv_loop_t* loop,
-    uv_idle_t& write_chunk_handler,
-    write_chunk_data_t& write_chunk_data) {
-  int r = uv_idle_init(loop, &write_chunk_handler);
-  ASSERT(r == 0);
-  write_chunk_handler.data = &write_chunk_data;
-  r = uv_idle_start(&write_chunk_handler, onwrite_chunk);
-  ASSERT(r == 0);
-}
 
 class KeyCollectorWritable : public RapidjsonWritable {
   public:
+
+// main thread {
+
     KeyCollectorWritable(uv_loop_t& loop)
       : RapidjsonWritable(), loop_(loop), processingComplete_(false) {
       uv_mutex_init(&completeMutex_);
@@ -80,16 +53,39 @@ class KeyCollectorWritable : public RapidjsonWritable {
       return processedKeys_;
     }
 
+// } main thread
+
   protected:
     //
     // The below overrides are called on parsing/processing background thread
     //
+    
+// background thread {
+
     // @override
     void onparserFailure(rapidjson::Reader& reader) {
       poblado_log("[processor] parser failure");
+      // TODO: set failure condition, set completeMutex
+      // so that the process function pick up the error on the main thread
+      // extract error info and pass on to virtual method
     }
 
     // @override
+    void onparseComplete() final {
+      // process the collected data when parsing completed
+      poblado_log("[processor] parser complete, processing ...");
+      processParsedData();
+      signalProcessingComplete_();
+    }
+
+// } background thread
+
+//
+// Implemented by User
+//
+
+// background thread {
+    // @override 
     void onparsedToken(rapidjson_writable::SaxHandler& handler) {
       poblado_log("[processor] parsed a token");
       if (handler.type != rapidjson_writable::JsonType::Key) return;
@@ -97,9 +93,7 @@ class KeyCollectorWritable : public RapidjsonWritable {
     }
 
     // @override
-    void onparseComplete() {
-      // process the collected data when parsing completed
-      poblado_log("[processor] parser complete, processing keys");
+    void processParsedData() {
       for (auto& key : keys_) {
         poblado_log(key);
         processedKeys_.push_back(string_toupper(key));
@@ -107,18 +101,19 @@ class KeyCollectorWritable : public RapidjsonWritable {
         // simulate that processing keys is slow
         uv_sleep(200);
       }
-
-      // Signal to main thread that processing is complete and the data can
-      // now be accesseed.
-      poblado_log("[processor] signaling processing is complete" );
-      uv_mutex_lock(&completeMutex_);
-      {
-        processingComplete_ = true;
-      }
-      uv_mutex_unlock(&completeMutex_);
     }
+// } background thread
+
+// main thread {
+    // @override
+    void onprocessingComplete() {
+
+    }
+// } main thread
 
   private:
+
+// main thread {
     static void onCheckProcessed(uv_idle_t* handle) {
       KeyCollectorWritable* self = static_cast<KeyCollectorWritable*>(handle->data);
       if (!self->isProcessingComplete()) return;
@@ -141,16 +136,37 @@ class KeyCollectorWritable : public RapidjsonWritable {
       r = uv_idle_start(&processed_handler_, onCheckProcessed);
       ASSERT(r == 0);
     }
+// } main thread
+
+// background thread {
+    void signalProcessingComplete_() {
+      // Signal to main thread that processing is complete and the data can
+      // now be accesseed.
+      poblado_log("[processor] signaling processing is complete" );
+      uv_mutex_lock(&completeMutex_);
+      {
+        processingComplete_ = true;
+      }
+      uv_mutex_unlock(&completeMutex_);
+    }
+// } background thread
 
     uv_loop_t& loop_;
     uv_idle_t processed_handler_;
 
-    std::vector<const char*> keys_;
     uv_mutex_t completeMutex_;
-    std::vector<const char*> processedKeys_;
     bool processingComplete_;
+
+    std::vector<const char*> keys_;
+    std::vector<const char*> processedKeys_;
+
 };
 
+//
+// Test
+//
+
+// Ticker
 void ontick(uv_idle_t* tick_handler) {
   ticks++;
   if ((ticks % LOG_TICK_INTERVAL) != 0) return;
@@ -161,6 +177,37 @@ void start_tick(uv_loop_t* loop, uv_idle_t& tick_handler) {
   int r = uv_idle_init(loop, &tick_handler);
   ASSERT(r == 0);
   r = uv_idle_start(&tick_handler, ontick);
+  ASSERT(r == 0);
+}
+
+// Chunk Producer
+typedef struct {
+  std::istream& stream;
+  RapidjsonWritable& writable;
+} write_chunk_data_t;
+
+void onwrite_chunk(uv_idle_t* handle) {
+  // write chunk every 10th iteration to simulate that the chunks are coming in slowly
+  if ((ticks % WRITE_CHUNK_INTERVAL) != 0) return;
+
+  write_chunk_data_t* write_chunk_data = static_cast<write_chunk_data_t*>(handle->data);
+  std::istream& stream = write_chunk_data->stream;
+  RapidjsonWritable& writable = write_chunk_data->writable;
+
+  std::vector<char> buffer(CHUNK_SIZE, 0);
+  stream.read(buffer.data(), buffer.size());
+  writable.write(*buffer.data(), buffer.size());
+  if (stream.eof()) uv_idle_stop(handle);
+}
+
+void start_write_chunk(
+    uv_loop_t* loop,
+    uv_idle_t& write_chunk_handler,
+    write_chunk_data_t& write_chunk_data) {
+  int r = uv_idle_init(loop, &write_chunk_handler);
+  ASSERT(r == 0);
+  write_chunk_handler.data = &write_chunk_data;
+  r = uv_idle_start(&write_chunk_handler, onwrite_chunk);
   ASSERT(r == 0);
 }
 
