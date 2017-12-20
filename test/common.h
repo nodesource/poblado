@@ -7,7 +7,7 @@
 
 extern uint64_t START_TIME;
 
-#define ASSERT(expr)                                      \
+#define TEST_ASSERT(expr)                                 \
  do {                                                     \
   if (!(expr)) {                                          \
     fprintf(stderr,                                       \
@@ -23,7 +23,7 @@ extern uint64_t START_TIME;
     ? __builtin_strrchr(__FILE__, '/') + 1 \
     : __FILE__)
 
-#define poblado_log(msg)                              \
+#define TEST_LOG(msg)                                 \
   do {                                                \
     uint64_t time = (uv_hrtime() / 1E6) - START_TIME; \
     fprintf(stderr,                                   \
@@ -35,12 +35,6 @@ extern uint64_t START_TIME;
             msg);                                     \
   } while (0)
 
-inline char* scopy(const char* s) {
-  size_t len = strlen(s);
-  char* cpy = new char[len + 1]();
-  strncpy(cpy, s, len + 1);
-  return cpy;
-}
 
 void inline uv_sleep(int msec) {
   int sec;
