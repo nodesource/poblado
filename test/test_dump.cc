@@ -17,49 +17,20 @@ int32_t ticks = 0;
 //
 using rapidjson_writable::RapidjsonWritable;
 
-class KeyCollectorWritable : public RapidjsonWritable {
+class Poblado : public RapidjsonWritable {
   public:
 
 // main thread {
 
-    KeyCollectorWritable(uv_loop_t& loop)
+    Poblado(uv_loop_t& loop)
       : RapidjsonWritable(), loop_(loop), processingComplete_(false) {
       uv_mutex_init(&completeMutex_);
       awaitProcessed();
     }
 
-    //
-    // Processing complete checks and processing results retrieval methods
-    // are called from main loop thread
-    bool isProcessingComplete() {
-      bool iscomplete;
-      // We use the cheaper lock, which is only locked by processor once
-      // to notify us that processing is complete to verify that we can go and
-      // get the processing result.
-      uv_mutex_lock(&completeMutex_);
-      {
-        iscomplete = processingComplete_;
-      }
-      uv_mutex_unlock(&completeMutex_);
-
-      return iscomplete;
-    }
-
-    std::vector<const char*>& getProcessingResult() {
-      // At this point we verified vis isProcessingComplete (using cheap lock)
-      // that the data is ready.
-      // The processor guarantees now that it won't access the data anymore, therefore
-      // we don't need to obtain another lock to return + access it on the main thread.
-      return processedKeys_;
-    }
-
 // } main thread
 
   protected:
-    //
-    // The below overrides are called on parsing/processing background thread
-    //
-    
 // background thread {
 
     // @override
@@ -80,53 +51,36 @@ class KeyCollectorWritable : public RapidjsonWritable {
 
 // } background thread
 
-//
-// Implemented by User
-//
-
-// background thread {
-    // @override 
-    void onparsedToken(rapidjson_writable::SaxHandler& handler) {
-      poblado_log("[processor] parsed a token");
-      if (handler.type != rapidjson_writable::JsonType::Key) return;
-      keys_.push_back(scopy(handler.stringVal.c_str()));
-    }
-
-    // @override
-    void processParsedData() {
-      for (auto& key : keys_) {
-        poblado_log(key);
-        processedKeys_.push_back(string_toupper(key));
-
-        // simulate that processing keys is slow
-        uv_sleep(200);
-      }
-    }
-// } background thread
-
-// main thread {
-    // @override
-    void onprocessingComplete() {
-
-    }
-// } main thread
-
   private:
 
 // main thread {
-    static void onCheckProcessed(uv_idle_t* handle) {
-      KeyCollectorWritable* self = static_cast<KeyCollectorWritable*>(handle->data);
-      if (!self->isProcessingComplete()) return;
-      poblado_log("[collector] found processing is complete, reading results");
-
-      // TODO: call a function that's passed to us so user can decide how to process
-      // Alternatively add a virtual method that we call
-      std::vector<const char*> processedKeys = self->getProcessingResult();
-      for (auto& key : processedKeys) {
-        poblado_log("[collector] printing key");
-        poblado_log(key);
+    bool isProcessingComplete() {
+      bool iscomplete;
+      // We use the cheaper lock, which is only locked by processor once
+      // to notify us that processing is complete to verify that we can go and
+      // get the processing result.
+      uv_mutex_lock(&completeMutex_);
+      {
+        iscomplete = processingComplete_;
       }
+      uv_mutex_unlock(&completeMutex_);
+
+      return iscomplete;
+    }
+
+    static void onCheckProcessed(uv_idle_t* handle) {
+      Poblado* self = static_cast<Poblado*>(handle->data);
+      if (!self->isProcessingComplete()) return;
+
+      // At this point we verified that the data is ready.
+      // The processor guarantees now that it won't access the data anymore
+      // on the background thread.
+      // Therefore the user doesn't need to obtain another lock to access it
+      // on the main thread.
+
+      poblado_log("[collector] found processing is complete, reading results");
       uv_idle_stop(handle);
+      self->onprocessingComplete();
     }
 
     void awaitProcessed() {
@@ -151,20 +105,71 @@ class KeyCollectorWritable : public RapidjsonWritable {
     }
 // } background thread
 
+  protected:
+
+//
+// Implemented by User
+//
+
+// background thread {
+    virtual void onparsedToken(rapidjson_writable::SaxHandler& handler) = 0;
+    virtual void processParsedData() = 0;
+// } background thread
+
+// main thread {
+    virtual void onprocessingComplete() = 0;
+// } main thread
+
+  private:
     uv_loop_t& loop_;
     uv_idle_t processed_handler_;
-
     uv_mutex_t completeMutex_;
     bool processingComplete_;
-
-    std::vector<const char*> keys_;
-    std::vector<const char*> processedKeys_;
-
 };
 
 //
 // Test
 //
+
+class ExtractKeysProcessor : public Poblado {
+  public:
+    ExtractKeysProcessor(uv_loop_t& loop) : Poblado(loop) {}
+
+  private:
+// background thread {
+
+    // @override
+    void onparsedToken(rapidjson_writable::SaxHandler& handler) {
+      poblado_log("[processor] parsed a token");
+      if (handler.type != rapidjson_writable::JsonType::Key) return;
+      keys_.push_back(scopy(handler.stringVal.c_str()));
+    }
+
+    // @override
+    void processParsedData() {
+      for (auto& key : keys_) {
+        poblado_log(key);
+        processedKeys_.push_back(string_toupper(key));
+
+        // simulate that processing keys is slow
+        uv_sleep(200);
+      }
+    }
+
+  // } background thread
+
+  // main thread {
+    void onprocessingComplete() {
+      for (auto& key : processedKeys_) {
+        poblado_log("[collector] printing key");
+        poblado_log(key);
+      }
+    }
+  // main thread }
+
+    std::vector<const char*> keys_;
+    std::vector<const char*> processedKeys_;
+};
 
 // Ticker
 void ontick(uv_idle_t* tick_handler) {
@@ -217,16 +222,16 @@ int main(int argc, char *argv[]) {
   std::ifstream ifs(file);
 
   uv_loop_t* loop = uv_default_loop();
-  KeyCollectorWritable writable(*loop);
+  ExtractKeysProcessor processor(*loop);
   {
     const int ok = 1;
-    const int* r = writable.init(&ok);
+    const int* r = processor.init(&ok);
     ASSERT(*r == ok);
   }
 
   uv_idle_t write_chunk_handler;
   {
-    write_chunk_data_t write_chunk_data = { .stream = ifs, .writable = writable };
+    write_chunk_data_t write_chunk_data = { .stream = ifs, .writable = processor };
     start_write_chunk(loop, write_chunk_handler, write_chunk_data);
   }
 
