@@ -1,5 +1,6 @@
 #include <uv.h>
 #include "rapidjson_writable.h"
+#include "rapidjson/error/en.h"
 #include "common.h"
 
 #include <fstream>
@@ -17,15 +18,37 @@ int32_t ticks = 0;
 //
 using rapidjson_writable::RapidjsonWritable;
 
+static const char* parserError(rapidjson::Reader& reader) {
+  const rapidjson::ParseErrorCode errorCode = reader.GetParseErrorCode();
+  const std::string errorMsg = rapidjson::GetParseError_En(errorCode);
+  const size_t offset = reader.GetErrorOffset();
+
+  std::string msg(
+    "A parser error occurred, this could be due to incomplete or invalid JSON.\n"
+    "Error: [ " + errorMsg + " ]\n"
+    "The error occured at file offset: " + std::to_string(offset)
+  );
+
+  return scopy(msg.c_str());
+}
+
 class Poblado : public RapidjsonWritable {
   public:
 
 // main thread {
 
     Poblado(uv_loop_t& loop)
-      : RapidjsonWritable(), loop_(loop), processingComplete_(false) {
+      : RapidjsonWritable(),
+        loop_(loop),
+        processingComplete_(false),
+        hasError_(false),
+        error_(nullptr) {
       uv_mutex_init(&completeMutex_);
       awaitProcessed();
+    }
+
+    ~Poblado() {
+      if (error_ != nullptr) delete[] error_;
     }
 
 // } main thread
@@ -36,9 +59,9 @@ class Poblado : public RapidjsonWritable {
     // @override
     void onparserFailure(rapidjson::Reader& reader) {
       poblado_log("[processor] parser failure");
-      // TODO: set failure condition, set completeMutex
-      // so that the process function pick up the error on the main thread
-      // extract error info and pass on to virtual method
+      hasError_ = true;
+      error_ = parserError(reader);
+      signalProcessingComplete_();
     }
 
     // @override
@@ -106,6 +129,8 @@ class Poblado : public RapidjsonWritable {
 // } background thread
 
   protected:
+    bool& hasError() { return hasError_; }
+    const char& error() { return *error_; }
 
 //
 // Implemented by User
@@ -125,6 +150,8 @@ class Poblado : public RapidjsonWritable {
     uv_idle_t processed_handler_;
     uv_mutex_t completeMutex_;
     bool processingComplete_;
+    bool hasError_;
+    const char* error_;
 };
 
 //
@@ -156,16 +183,22 @@ class ExtractKeysProcessor : public Poblado {
       }
     }
 
-  // } background thread
+// } background thread
 
-  // main thread {
+// main thread {
     void onprocessingComplete() {
+      if (hasError()) {
+        poblado_log("[collector] found error");
+        fprintf(stderr, "%s\n", &error());
+        return;
+      }
+
       for (auto& key : processedKeys_) {
         poblado_log("[collector] printing key");
         poblado_log(key);
       }
     }
-  // main thread }
+// main thread }
 
     std::vector<const char*> keys_;
     std::vector<const char*> processedKeys_;
