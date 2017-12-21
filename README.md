@@ -1,4 +1,4 @@
-# poblado
+# poblado [![build status](https://secure.travis-ci.org/nodesource/poblado.svg?branch=master)](http://travis-ci.org/nodesource/poblado)
 
 Parses and processes JSON that is written to it in chunks on a background thread.
 
@@ -10,10 +10,6 @@ Parses and processes JSON that is written to it in chunks on a background thread
 
 Make sure you are including all those headers when building and in the case of libuv you need to either link to the
 libuv library as well or make it part of your build.
-
-## Status
-
-Functional API, still untested, for now **use at your own risk, tests coming soon :)**.
 
 ## Example
 
