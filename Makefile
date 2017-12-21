@@ -42,6 +42,7 @@ test_capitalize: $(TEST_CAPITALIZE)
 
 clean:
 	@rm -f $(TEST_DUMP) $(TST_DUMP_OBJS)
+	@rm -f $(TEST_CAPITALIZE) $(TST_CAPITALIZE_OBJS)
 	@rm -rf $(ROOT)/build/CMakeFiles $(ROOT)/build/CMakeCache.txt
 
 xcode:
@@ -55,4 +56,4 @@ ninja:
 		CC=`xcrun -find cc` CXX=`xcrun -find c++` LDFLAGS='$(UV_LIB)' cmake -G Ninja ..) && \
 	ninja -C build
 
-.PHONY: test_dump xcode ninja
+.PHONY: test_dump test_capitalize xcode ninja
