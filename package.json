@@ -2,7 +2,11 @@
   "name": "poblado",
   "version": "0.0.0",
   "description": "Parses and processes JSON that is written to it in chunks on a background thread.",
-  "main": "poblado.js",
+  "files": [
+    "include/",
+    "include-dirs.js"
+  ],
+  "main": "include-dirs.js",
   "scripts": {
     "pretest": "make test_capitalize",
     "test": "tape test/*.js"
@@ -12,7 +16,6 @@
     "url": "git://github.com/nodesource/poblado.git"
   },
   "homepage": "https://github.com/nodesource/poblado",
-  "dependencies": {},
   "devDependencies": {
     "tape": "~4.8.0"
   },
