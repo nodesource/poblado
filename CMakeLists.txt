@@ -34,3 +34,9 @@ add_executable(test_dump
   ${PROJECT_TEST_DIR}/test_dump.cc ${poblado_test_headers}
   ${rapidjson_writable_headers} ${rapidjson_headers} ${uv_headers} ${uv_sources}
 )
+
+add_executable(test_capitalize
+  ${poblado_headers}
+  ${PROJECT_TEST_DIR}/test_capitalize.cc ${poblado_test_headers}
+  ${rapidjson_writable_headers} ${rapidjson_headers} ${uv_headers} ${uv_sources}
+)

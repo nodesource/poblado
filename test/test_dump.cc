@@ -113,10 +113,6 @@ void onwrite_chunk(uv_idle_t* handle) {
   if (stream.eof()) uv_idle_stop(handle);
 }
 
-void onfinished() {
-  finished = true;
-}
-
 void start_write_chunk(
     uv_loop_t* loop,
     uv_idle_t& write_chunk_handler,
@@ -126,6 +122,10 @@ void start_write_chunk(
   write_chunk_handler.data = &write_chunk_data;
   r = uv_idle_start(&write_chunk_handler, onwrite_chunk);
   TEST_ASSERT(r == 0);
+}
+
+void onfinished() {
+  finished = true;
 }
 
 int main(int argc, char *argv[]) {

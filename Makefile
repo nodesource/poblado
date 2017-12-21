@@ -24,6 +24,16 @@ $(TEST_DUMP): $(UV_LIB) $(TST_DUMP_OBJS)
 
 test_dump: $(TEST_DUMP)
 
+TEST_CAPITALIZE = $(BIN_DIR)/test_capitalize
+TST_CAPITALIZE_SRCS=$(TST_DIR)/test_capitalize.cc
+TST_CAPITALIZE_OBJS=$(TST_CAPITALIZE_SRCS:.cc=.o)
+
+$(TEST_CAPITALIZE): $(UV_LIB) $(TST_CAPITALIZE_OBJS)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(LIBS) $(TST_CAPITALIZE_OBJS) $(UV_LIB) -o $@
+
+test_capitalize: $(TEST_CAPITALIZE)
+
 .SUFFIXES: .cc .o
 .cc.o:
 	@(([ -d $(RAPIDJSON_WRITABLE_DIR) ] || $(MAKE) $(RAPIDJSON_WRITABLE_DIR)) && \
