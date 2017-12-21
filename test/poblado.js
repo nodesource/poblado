@@ -32,7 +32,7 @@ function runTest(t, chunkSize, processorDelay, payload) {
   const obj = payload[1]
   const expected = payload[2]
 
-  test('\n[ chunkSize: 64, processorDelay: 20 ] ' + name, function(t) {
+  test(` ------------- \n## [ chunkSize: ${chunkSize}, processorDelay: ${processorDelay}, payload: ${name} ]`, function(t) {
     const json = JSON.stringify(obj)
     const cmd = `echo '${json}' | ${capitalize} ${chunkSize} ${processorDelay}`
     console.log(cmd)
