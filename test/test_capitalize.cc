@@ -38,6 +38,11 @@ class Capitalizer : public Poblado {
     Capitalizer(uv_loop_t& loop, callback_t onfinished)
       : Poblado(loop), onfinished_(onfinished) {}
 
+    ~Capitalizer() {
+      for (const char* c : strings_) delete [] c;
+      for (const char* c : capitalizedStrings_) delete [] c;
+    }
+
   private:
     // @override
     void onparsedToken(rapidjson_writable::SaxHandler& handler) {

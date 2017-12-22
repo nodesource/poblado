@@ -31,6 +31,11 @@ class ExtractKeysProcessor : public Poblado {
     ExtractKeysProcessor(uv_loop_t& loop, callback_t onfinished)
       : Poblado(loop), onfinished_(onfinished) {}
 
+    ~ExtractKeysProcessor() {
+      for (const char* c : keys_) delete [] c;
+      for (const char* c : processedKeys_) delete [] c;
+    }
+
   private:
 // background thread {
 
