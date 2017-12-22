@@ -16,10 +16,10 @@
 #include <fstream>
 #include <unistd.h>
 
-#define CHUNK_SIZE 64
+#define CHUNK_SIZE 640
 uint64_t START_TIME = uv_hrtime() / 1E6;
 
-const int32_t LOG_TICK_INTERVAL = 1E6;
+const int32_t LOG_TICK_INTERVAL = 1E4;
 const int32_t WRITE_CHUNK_INTERVAL = LOG_TICK_INTERVAL / 2;
 int32_t ticks = 0;
 static bool finished = false;
@@ -53,7 +53,7 @@ class ExtractKeysProcessor : public Poblado {
         processedKeys_.push_back(string_toupper(key));
 
         // simulate that processing keys is slow
-        uv_sleep(200);
+        uv_sleep(20);
       }
     }
 
